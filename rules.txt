@@ -1,192 +1,49 @@
-package com.iorgana.mobile_firewall.ui.add;
-
-import android.content.Context;
-import android.content.Intent;
-import android.os.AsyncTask; // Importar AsyncTask para operaciones en segundo plano
-import android.os.Bundle;
-import android.view.MenuItem;
-import android.widget.LinearLayout;
-
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.ActionBar;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.viewbinding.ViewBinding; // Importar ViewBinding para el binding
-
-import com.iorgana.droidhelpers.alerts.AlertMaker;
-import com.iorgana.localvpn.model.RuleModel;
-import com.iorgana.mobile_firewall.R;
-import com.iorgana.mobile_firewall.databinding.ActivityAddRuleBinding; // Asegúrate de que esta clase se genere correctamente
-import com.iorgana.mobile_firewall.ui.home.MainActivity;
-import com.iorgana.mobile_firewall.util.RuleHelper;
-
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-
-public class AddRuleActivity extends AppCompatActivity {
-    public static final String RULE_ADDED = "_R.RULE_ADDED";
-    public static final String RULE_INBOUND = "_R.RULE_INBOUND";
-    public static final String RULE_OUTBOUND = "_R.RULE_OUTBOUND";
-
-    // ¡IMPORTANTE! Reemplaza esta URL con la URL "Raw" de tu archivo rules.txt en GitHub.
-    // Ejemplo: "https://raw.githubusercontent.com/tu_usuario/tu_repositorio/main/rules.txt"
-    private static final String GITHUB_RULES_URL = "https://raw.githubusercontent.com/example/repo/main/rules.txt"; // CAMBIA ESTO
-
-    ActionBar actionBar;
-    ActivityAddRuleBinding binding;
-    Context context = this;
-
-    @Override
-    protected void onCreate(Bundle bundle) {
-        super.onCreate(bundle);
-        // Inflar el layout usando ViewBinding
-        binding = ActivityAddRuleBinding.inflate(getLayoutInflater());
-        setContentView(binding.getRoot());
-
-        initUI();
-        // Iniciar la descarga de reglas al crear la actividad
-        fetchRulesFromGitHub();
-    }
-
-    public void initUI() {
-        ActionBar supportActionBar = getSupportActionBar();
-        this.actionBar = supportActionBar;
-        if (supportActionBar != null) {
-            supportActionBar.setDisplayHomeAsUpEnabled(true);
-            this.actionBar.setDisplayShowHomeEnabled(true);
-            this.actionBar.setTitle(this.context.getResources().getString(R.string.activity_add_rule_title));
-        }
-
-        // Ocultar los elementos de entrada manual de reglas
-        // Asegúrate de que estos IDs existen en tu activity_add_rule.xml y que son elementos ocultables
-        // Si no existen o son diferentes, ajústalos. Por ejemplo, podrían estar dentro de un LinearLayout que puedas ocultar.
-        if (binding.inputAddressLayout != null) binding.inputAddressLayout.setVisibility(View.GONE);
-        if (binding.inputPortLayout != null) binding.inputPortLayout.setVisibility(View.GONE);
-        if (binding.radioGroupProtocol != null) binding.radioGroupProtocol.setVisibility(View.GONE);
-        if (binding.btnApply != null) binding.btnApply.setVisibility(View.GONE);
-
-        // Opcional: Mostrar un mensaje de "Cargando reglas..."
-        showAlert(AlertMaker.AlertType.Info, getResources().getString(R.string.loading_rules_title), getResources().getString(R.string.loading_rules_msg));
-    }
-
-    private void fetchRulesFromGitHub() {
-        new AsyncTask<Void, Void, Integer>() {
-            private String errorMessage = null;
-
-            @Override
-            protected void onPreExecute() {
-                super.onPreExecute();
-                // Mostrar un mensaje de carga
-                runOnUiThread(() -> showAlert(AlertMaker.AlertType.Info,
-                        getResources().getString(R.string.loading_rules_title),
-                        getResources().getString(R.string.loading_rules_msg)));
-            }
-
-            @Override
-            protected Integer doInBackground(Void... voids) {
-                int rulesAddedCount = 0;
-                try {
-                    URL url = new URL(GITHUB_RULES_URL);
-                    HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
-                    try {
-                        BufferedReader reader = new BufferedReader(new InputStreamReader(urlConnection.getInputStream()));
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            line = line.trim();
-                            if (line.isEmpty() || line.startsWith("#")) {
-                                continue; // Ignorar líneas vacías o comentarios
-                            }
-
-                            // Esperamos formato: RULE_TYPE,IP_PROTOCOL,ADDRESS,PORT
-                            String[] parts = line.split(",");
-                            if (parts.length == 4) {
-                                try {
-                                    RuleModel.RuleType ruleType = RuleModel.RuleType.valueOf(parts[0].trim().toUpperCase());
-                                    RuleModel.IPProtocol ipProtocol = RuleModel.IPProtocol.valueOf(parts[1].trim().toUpperCase());
-                                    String address = parts[2].trim();
-                                    String port = parts[3].trim();
-
-                                    RuleModel ruleModel = new RuleModel(ruleType, ipProtocol, address, port);
-
-                                    // Verificar si la regla ya existe antes de guardar
-                                    if (!RuleHelper.getInstance(context).isRuleExists(ruleModel)) {
-                                        RuleHelper.getInstance(context).saveRule(ruleModel);
-                                        rulesAddedCount++;
-                                    }
-                                } catch (IllegalArgumentException e) {
-                                    // Log o manejar error de formato de línea específica
-                                    // Por simplicidad, aquí solo se ignora la línea malformada
-                                    System.err.println("Skipping malformed rule line: " + line + " - Error: " + e.getMessage());
-                                }
-                            } else {
-                                System.err.println("Skipping malformed rule line (incorrect number of parts): " + line);
-                            }
-                        }
-                        reader.close();
-                    } finally {
-                        urlConnection.disconnect();
-                    }
-                } catch (Exception e) {
-                    errorMessage = e.getMessage();
-                    e.printStackTrace();
-                    return -1; // Indicar error
-                }
-                return rulesAddedCount;
-            }
-
-            @Override
-            protected void onPostExecute(Integer rulesAddedCount) {
-                super.onPostExecute(rulesAddedCount);
-                if (rulesAddedCount == -1) {
-                    // Error al descargar o procesar
-                    runOnUiThread(() -> showAlert(AlertMaker.AlertType.Error,
-                            getResources().getString(R.string.error_title),
-                            getResources().getString(R.string.failed_to_fetch_rules) + (errorMessage != null ? ": " + errorMessage : "")));
-                } else if (rulesAddedCount > 0) {
-                    // Éxito con reglas añadidas
-                    runOnUiThread(() -> showAlert(AlertMaker.AlertType.Success,
-                            getResources().getString(R.string.success_title),
-                            getResources().getString(R.string.rules_loaded_successfully) + " " + rulesAddedCount + " " + getResources().getString(R.string.rules_added)));
-                } else {
-                    // Éxito, pero no se añadieron nuevas reglas (quizás ya existían)
-                    runOnUiThread(() -> showAlert(AlertMaker.AlertType.Info,
-                            getResources().getString(R.string.info_title),
-                            getResources().getString(R.string.no_new_rules_added)));
-                }
-
-                // Volver a la actividad principal después de un breve retraso
-                new Handler().postDelayed(() -> {
-                    Intent intent = new Intent(context, MainActivity.class);
-                    intent.setAction(RULE_ADDED); // Puedes usar esta acción para que MainActivity sepa que se actualizaron las reglas
-                    startActivity(intent);
-                    finish();
-                }, 2000); // Retraso de 2 segundos para que el usuario vea el mensaje
-            }
-        }.execute();
-    }
-
-    private void showAlert(AlertMaker.AlertType alertType, String str, String str2) {
-        LinearLayout linearLayoutBuild = new AlertMaker(this.context).setType(alertType).setCancelable(true).setTitle(str).setContent(str2).build();
-        this.binding.statusContainer.removeAllViews();
-        this.binding.statusContainer.addView(linearLayoutBuild);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem menuItem) {
-        if (menuItem.getItemId() != android.R.id.home) { // Utiliza android.R.id.home para el botón de retroceso
-            return super.onOptionsItemSelected(menuItem);
-        }
-        finish();
-        return true;
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        // No es necesario interrumpir el AsyncTask directamente aquí,
-        // ya que el sistema lo gestiona mejor y podría haber problemas de memoria.
-        // Si necesitas cancelar activamente, tendrías que guardar la instancia de AsyncTask
-        // y llamar a .cancel(true). Para esta implementación simple, no es crítico.
-    }
-}
+# Rules for blocking outbound access to social networks
+OUTBOUND,TCP,104.18.53.238,80
+OUTBOUND,TCP,104.18.53.238,443
+OUTBOUND,TCP,104.21.12.105,80
+OUTBOUND,TCP,104.21.12.105,443
+OUTBOUND,TCP,104.21.32.1,80
+OUTBOUND,TCP,104.21.32.1,443
+OUTBOUND,TCP,104.21.64.1,80
+OUTBOUND,TCP,104.21.64.1,443
+OUTBOUND,TCP,104.21.48.1,80
+OUTBOUND,TCP,104.21.48.1,443
+OUTBOUND,TCP,104.21.82.53,80
+OUTBOUND,TCP,104.21.82.53,443
+OUTBOUND,TCP,104.21.96.1,80
+OUTBOUND,TCP,104.21.96.1,443
+OUTBOUND,TCP,104.18.52.175,80
+OUTBOUND,TCP,104.18.52.175,443
+OUTBOUND,TCP,104.21.27.159,80
+OUTBOUND,TCP,104.21.27.159,443
+OUTBOUND,TCP,104.21.47.146,80
+OUTBOUND,TCP,104.21.47.146,443
+OUTBOUND,TCP,104.21.80.1,80
+OUTBOUND,TCP,104.21.80.1,443
+OUTBOUND,TCP,104.21.16.1,80
+OUTBOUND,TCP,104.21.16.1,443
+OUTBOUND,TCP,104.21.3.186,80
+OUTBOUND,TCP,104.21.3.186,443
+OUTBOUND,TCP,104.21.112.1,80
+OUTBOUND,TCP,104.21.112.1,443
+OUTBOUND,TCP,104.21.91.236,80
+OUTBOUND,TCP,104.21.91.236,443
+OUTBOUND,TCP,172.67.131.24,80
+OUTBOUND,TCP,172.67.131.24,443
+OUTBOUND,TCP,172.67.143.60,80
+OUTBOUND,TCP,172.67.143.60,443
+OUTBOUND,TCP,172.67.181.234,80
+OUTBOUND,TCP,172.67.181.234,443
+OUTBOUND,TCP,172.67.148.115,80
+OUTBOUND,TCP,172.67.148.115,443
+OUTBOUND,TCP,172.67.194.18,80
+OUTBOUND,TCP,172.67.194.18,443
+OUTBOUND,TCP,172.67.196.17,80
+OUTBOUND,TCP,172.67.196.17,443
+OUTBOUND,TCP,172.217.15.202,80
+OUTBOUND,TCP,172.217.15.202,443
+OUTBOUND,TCP,172.217.165.195,80
+OUTBOUND,TCP,172.217.165.195,443
+OUTBOUND,TCP,172.217.165.196,80
+OUTBOUND,TCP,172.217.165.196,443
