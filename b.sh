@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Carpeta destino
-rootdir="/workspaces/a/xmrig"
+rootdir="/workspaces/rules/xmrig"
 
 echo "=== Instalando dependencias necesarias ==="
 sudo apt-get update
